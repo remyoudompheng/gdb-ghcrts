@@ -167,33 +167,55 @@ class Closure:
         p = info.cast(StgRetInfoTable_p) - 1
         return p.dereference()
 
-    def source(self):
+    def pc(self):
         p = self.obj.address.cast(StgWord_p)
-        pc = int(p.dereference())
-        symline = gdb.find_pc_line(pc)
+        return int(p.dereference())
+
+    def lineno(self):
+        sym = gdb.find_pc_line(self.pc())
+        return "{}:{}".format(
+            sym.symtab.filename if sym.symtab else '?', sym.line)
+
+    def funcname(self):
+        pc = self.pc()
         block = gdb.block_for_pc(pc)
-        if block is None:
-            func = gdb.execute("info symbol 0x%x" % pc, to_string=True)
+        if block is not None:
+            if block.function:
+                return zdecode(str(block.function))
+            func = gdb.execute("info symbol 0x%x" % block.start, to_string=True)
             if "_info" in func:
                 func, _, _ = func.partition("_info")
-            if "No symbol" in func:
-                func = None
-        else:
-            func = block.function
+                return zdecode(func)
 
-        func = zdecode(func)
-        return (func, symline)
+        closure = False
+        while block and block.superblock:
+            block = block.superblock
+            closure = True
+            if block.function:
+                return "closure in " + zdecode(str(block.function))
+
+            func = gdb.execute("info symbol 0x%x" % block.start, to_string=True)
+            if "_info" in func:
+                func, _, _ = func.partition("_info")
+                return "closure in " + zdecode(func)
+
+        func = gdb.execute("info symbol 0x%x" % pc, to_string=True)
+        if "_info" in func:
+            func, _, _ = func.partition("_info")
+        if "No symbol" in func:
+            return "??"
+
+        return ("closure in " if closure else "") + zdecode(func)
 
     def print_frame(self):
         info = self.info()
         typ = int(info['type'])
-        func, sym = self.source()
+        func = self.funcname()
         if not func:
             func = str(self.info()['code'].address)
-        print("  {} (type {})".format(
-            func, self.types_str.get(typ, typ)))
-        print("    {}:{}".format(
-            sym.symtab.filename if sym.symtab else '?', sym.line))
+        print("  {} (0x{:x}, type {})".format(
+            func, self.pc(), self.types_str.get(typ, typ)))
+        print("   ", self.lineno())
 
     # from rts/storage/ClosureTypes.h
     RET_BCO = 29
