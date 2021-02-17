@@ -28,11 +28,13 @@ class InfoTsos(gdb.Command):
     def __init__(self):
         gdb.Command.__init__(self, "info tsos", gdb.COMMAND_STACK, gdb.COMPLETE_NONE)
 
-    def invoke(self, _arg, _from_tty):
+    def invoke(self, argstr, _from_tty):
+        args = argstr.split()
+        compact = "-c" in args
         for t in all_tsos():
             print("TSO {} ({})".format(t.id(), t.status()))
             for obj in t.walk_stack():
-                obj.print_frame()
+                obj.print_frame(compact=compact)
             print()
 
 def all_tsos():
@@ -150,6 +152,12 @@ def pc_funcname(pc):
         return func
     return None
 
+def block_funcname(b):
+    if b.function:
+        return str(b.function)
+
+    return pc_funcname(b.start)
+
 def clean_funcname(f):
     """
     Decodes and strips symbol name from any GHC decorations
@@ -161,6 +169,20 @@ def clean_funcname(f):
         f = f[:-len("_ret_info")]
     if f.endswith("_info"):
         f = f[:-len("_info")]
+    return f
+
+def pretty_funcname(f):
+    """
+    >>> pretty_funcname("aesonzm1zi4zi6zi0zmI0PKQM6ADfIKvzzTI4BNoug_DataziAttoparsecziTime_zdwf_info")
+    'aeson:Data.Attoparsec.Time_$wf'
+    """
+    f = clean_funcname(f)
+    if '-' in f:
+        # strip package version number and hash
+        pkg, _, f = f.partition('_')
+        pkg, _, _ = pkg.partition('.')
+        pkg = pkg.rstrip("1234567890-")
+        return pkg + ":" + f
     return f
 
 class Closure:
@@ -201,47 +223,53 @@ class Closure:
         return "{}:{}".format(
             sym.symtab.filename if sym.symtab else '?', sym.line)
 
-    def funcname(self):
+    def funcname(self, pretty=False):
+        clean = pretty_funcname if pretty else clean_funcname
+
         pc = self.pc()
         block = gdb.block_for_pc(pc)
         if block is not None:
-            if block.function:
-                return clean_funcname(str(block.function))
-            func = pc_funcname(block.start)
+            func = block_funcname(block)
             if func:
-                return clean_funcname(func)
+                return clean(func)
 
         closure = False
         while block and block.superblock:
             block = block.superblock
             closure = True
-            if block.function:
-                return "closure in " + clean_funcname(str(block.function))
-
-            func = pc_funcname(block.start)
+            func = block_funcname(block)
             if func:
-                return "closure in " + clean_funcname(func)
+                return clean(func) + ":closure"
 
         func = pc_funcname(pc)
         if func:
-            func = clean_funcname(func)
+            func = clean(func)
+            if closure:
+                func += ":closure"
         if func is None:
             return "??"
 
-        if closure:
-            return "closure in " + func
-        else:
-            return func
+        return func
 
-    def print_frame(self):
+    def print_frame(self, compact=False):
         info = self.info()
         typ = int(info['type'])
-        func = self.funcname()
+        func = self.funcname(pretty=compact)
         if not func:
             func = str(self.info()['code'].address)
-        print("  {} (0x{:x}, type {})".format(
-            func, self.pc(), self.types_str.get(typ, typ)))
-        print("   ", self.lineno())
+
+        pc = self.pc()
+        if compact:
+            sym = gdb.find_pc_line(pc)
+            if sym.symtab:
+                print("  0x{:016x} in {} at {}:{}".format(
+                    pc, func, sym.symtab.filename, sym.line))
+            else:
+                print("  0x{:016x} in {}".format(pc, func))
+        else:
+            print("  {} (0x{:x}, type {})".format(
+                func, pc, self.types_str.get(typ, typ)))
+            print("   ", self.lineno())
 
     # from rts/storage/ClosureTypes.h
     RET_BCO = 29
