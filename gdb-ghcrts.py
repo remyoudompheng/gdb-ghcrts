@@ -214,7 +214,10 @@ def guess_funcname(pc):
         if l.line > pcline:
             continue
         if l.line > line:
-            s = gdb.block_for_pc(l.pc).function
+            try:
+                s = gdb.block_for_pc(l.pc).function
+            except Exception:
+                s = None
             if s is None:
                 continue
             if "zm" in s.name and "zi" in s.name and "_" in s.name:
@@ -295,7 +298,10 @@ class Closure:
         clean = pretty_funcname if pretty else clean_funcname
 
         pc = self.pc()
-        block = gdb.block_for_pc(pc)
+        try:
+            block = gdb.block_for_pc(pc)
+        except Exception:
+            block = None
         if block is not None:
             func = block_funcname(block)
             if func:
