@@ -222,7 +222,7 @@ class Closure:
             if func:
                 return "closure in " + clean_funcname(func)
 
-        func = pc_funcname(block.start)
+        func = pc_funcname(pc)
         if func:
             func = clean_funcname(func)
         if func is None:
