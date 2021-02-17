@@ -172,6 +172,29 @@ def block_funcname(b):
 
     return pc_funcname(b.start)
 
+def guess_funcname(pc):
+    """
+    Heuristical resolution of parent function name using line tables.
+    """
+    sym = gdb.find_pc_line(pc)
+    if not sym.symtab:
+        return None
+    pcline = sym.line
+    line = 0
+    f = None
+    for l in sym.symtab.linetable():
+        if l.line > pcline:
+            continue
+        if l.line > line:
+            s = gdb.block_for_pc(l.pc).function
+            if s is None:
+                continue
+            if "zm" in s.name and "zi" in s.name and "_" in s.name:
+                # looks like an ordinary function from a package
+                line = l.line
+                f = s.name
+    return f
+
 def clean_funcname(f):
     """
     Decodes and strips symbol name from any GHC decorations
@@ -190,6 +213,8 @@ def pretty_funcname(f):
     >>> pretty_funcname("aesonzm1zi4zi6zi0zmI0PKQM6ADfIKvzzTI4BNoug_DataziAttoparsecziTime_zdwf_info")
     'aeson:Data.Attoparsec.Time_$wf'
     """
+    if f is None:
+        return None
     f = clean_funcname(f)
     if '-' in f:
         # strip package version number and hash
@@ -248,6 +273,7 @@ class Closure:
             if func:
                 return clean(func)
 
+        # Try a parent block
         closure = False
         while block and block.superblock:
             block = block.superblock
@@ -261,10 +287,16 @@ class Closure:
             func = clean(func)
             if closure:
                 func += ":closure"
-        if func is None:
-            return "??"
+            return func
 
-        return func
+        # Try heuristics
+        if pretty and func is None:
+            func = guess_funcname(pc)
+            if func:
+                func = clean(func)
+                return func + ":??"
+
+        return "??"
 
     def print_frame(self, compact=False):
         info = self.info()
