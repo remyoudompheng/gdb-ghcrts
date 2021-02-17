@@ -58,7 +58,7 @@ class InfoTsoProfile(gdb.Command):
                 stack = []
                 prev = None
                 for obj in t.walk_stack():
-                    f = obj.funcname(pretty=True)
+                    f = obj.cached_funcname()
                     if not verbose:
                         if f == "??" or f.startswith("stg_"):
                             # skip
@@ -296,6 +296,17 @@ class Closure:
         sym = gdb.find_pc_line(self.pc())
         return "{}:{}".format(
             sym.symtab.filename if sym.symtab else '?', sym.line)
+
+    funcname_cache = {}
+
+    def cached_funcname(self):
+        pc = self.pc()
+        if pc not in self.funcname_cache:
+            f = self.funcname(pretty=True)
+            self.funcname_cache[pc] = f
+        else:
+            f = self.funcname_cache[pc]
+        return f
 
     def funcname(self, pretty=False):
         clean = pretty_funcname if pretty else clean_funcname
