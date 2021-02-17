@@ -138,6 +138,31 @@ class TSO:
         BlockedOnMVarRead: "waiting for MVar read",
     }
 
+# Helpers to extract function names.
+
+def pc_funcname(pc):
+    try:
+        func = gdb.execute("info symbol 0x%x" % pc, to_string=True)
+    except Exception:
+        return None
+    if "_info" in func:
+        func, _, _ = func.partition(" ")
+        return func
+    return None
+
+def clean_funcname(f):
+    """
+    Decodes and strips symbol name from any GHC decorations
+    """
+    if f is None:
+        return None
+    f = zdecode(f)
+    if f.endswith("_ret_info"):
+        f = f[:-len("_ret_info")]
+    if f.endswith("_info"):
+        f = f[:-len("_info")]
+    return f
+
 class Closure:
     "A StgClosure generic heap object"
     def __init__(self, p):
@@ -181,31 +206,32 @@ class Closure:
         block = gdb.block_for_pc(pc)
         if block is not None:
             if block.function:
-                return zdecode(str(block.function))
-            func = gdb.execute("info symbol 0x%x" % block.start, to_string=True)
-            if "_info" in func:
-                func, _, _ = func.partition("_info")
-                return zdecode(func)
+                return clean_funcname(str(block.function))
+            func = pc_funcname(block.start)
+            if func:
+                return clean_funcname(func)
 
         closure = False
         while block and block.superblock:
             block = block.superblock
             closure = True
             if block.function:
-                return "closure in " + zdecode(str(block.function))
+                return "closure in " + clean_funcname(str(block.function))
 
-            func = gdb.execute("info symbol 0x%x" % block.start, to_string=True)
-            if "_info" in func:
-                func, _, _ = func.partition("_info")
-                return "closure in " + zdecode(func)
+            func = pc_funcname(block.start)
+            if func:
+                return "closure in " + clean_funcname(func)
 
-        func = gdb.execute("info symbol 0x%x" % pc, to_string=True)
-        if "_info" in func:
-            func, _, _ = func.partition("_info")
-        if "No symbol" in func:
+        func = pc_funcname(block.start)
+        if func:
+            func = clean_funcname(func)
+        if func is None:
             return "??"
 
-        return ("closure in " if closure else "") + zdecode(func)
+        if closure:
+            return "closure in " + func
+        else:
+            return func
 
     def print_frame(self):
         info = self.info()
@@ -235,6 +261,14 @@ class Closure:
     }
 
 def zdecode(s):
+    """
+    See https://gitlab.haskell.org/ghc/ghc/-/wikis/commentary/compiler/symbol-names
+
+    >>> zdecode("base_TextziParserCombinatorsziReadP_zdfAlternativePzuzdczlzbzg_info")
+    'base_Text.ParserCombinators.ReadP_$fAlternativeP_$c<|>_info'
+    >>> zdecode("timezm1zi9zi3_DataziTimeziLocalTimeziInternalziTimeZZone_TimeZZone_con_info")
+    'time-1.9.3_Data.Time.LocalTime.Internal.TimeZone_TimeZone_con_info'
+    """
     res = ""
     while s:
         idx_z = s.find("z")
@@ -255,13 +289,28 @@ def zdecode(s):
     return res
 
 ztrans = {
-    "zz": "z",
+    "ZC": "ZC",
+    "ZL": "(",
+    "ZM": "[",
+    "ZN": "]",
+    "ZR": ")",
+    "ZZ": "Z",
     "za": "&",
+    "zb": "|",
     "zd": "$",
+    "ze": "=",
+    "zg": ">",
     "zh": "#",
     "zi": ".",
+    "zl": "<",
     "zm": "-",
+    "zn": "!",
+    "zp": "+",
+    "zq": "'",
+    "zs": "/",
+    "zt": "*",
     "zu": "_",
+    "zz": "z",
 }
 
 InfoTsos()
