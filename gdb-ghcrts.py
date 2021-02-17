@@ -31,8 +31,11 @@ class InfoTsos(gdb.Command):
 
     def invoke(self, argstr, _from_tty):
         args = argstr.split()
+        only_running = "-r" in args
         compact = "-c" in args
         for t in all_tsos():
+            if only_running and not t.running():
+                continue
             print("TSO {} ({})".format(t.id(), t.status()))
             for obj in t.walk_stack():
                 obj.print_frame(compact=compact)
@@ -92,6 +95,16 @@ class TSO:
         else:
             why = int(self.tso["why_blocked"])
             return TSO.why_str.get(why, "status {}".format(why))
+
+    def running(self):
+        what = int(self.tso["what_next"])
+        if what == TSO.ThreadKilled:
+            return False
+        elif what == TSO.ThreadComplete:
+            return False
+        else:
+            why = int(self.tso["why_blocked"])
+            return why == TSO.NotBlocked
 
     def walk_stack(self):
         # see rts/Printer.c:printTSO
