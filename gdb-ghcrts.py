@@ -16,6 +16,7 @@ if sys.version_info.major == 2:
 # Common types
 StgClosure_p = gdb.lookup_type("StgClosure").pointer()
 StgInfoTable_p = gdb.lookup_type("StgInfoTable").pointer()
+StgRetFun_p = gdb.lookup_type("StgRetFun").pointer()
 StgRetInfoTable_p = gdb.lookup_type("StgRetInfoTable").pointer()
 StgTSO_p = gdb.lookup_type("StgTSO").pointer()
 StgWord_p = gdb.lookup_type('StgWord').pointer()
@@ -195,7 +196,8 @@ class Closure:
         retinfo = self.retinfo()
         ctyp = retinfo['i']['type']
         if ctyp == Closure.RET_FUN:
-            raise NotImplementedError("barf")
+            size = self.obj.cast(StgRetFun_p).dereference()['size']
+            return StgRetFun_p.target().sizeof // StgRetFun_p.sizeof + size
         elif ctyp == Closure.RET_BIG:
             raise NotImplementedError("barf")
         elif ctyp == Closure.RET_BCO:
