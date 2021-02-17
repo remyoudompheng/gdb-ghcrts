@@ -52,22 +52,25 @@ class InfoTsoProfile(gdb.Command):
         uniq = "-u" in args
         verbose = "-v" in args
         for t in all_tsos():
-            if not t.running():
-                continue
-            stack = []
-            prev = None
-            for obj in t.walk_stack():
-                f = obj.funcname(pretty=True)
-                if not verbose:
-                    if f == "??" or f.startswith("stg_"):
-                        # skip
-                        continue
-                if uniq and f == prev:
+            try:
+                if not t.running():
                     continue
-                stack.append(f)
-                prev = f
-            stack.reverse()
-            print(";".join(stack))
+                stack = []
+                prev = None
+                for obj in t.walk_stack():
+                    f = obj.funcname(pretty=True)
+                    if not verbose:
+                        if f == "??" or f.startswith("stg_"):
+                            # skip
+                            continue
+                    if uniq and f == prev:
+                        continue
+                    stack.append(f)
+                    prev = f
+                stack.reverse()
+                print("PROFILE;" + ";".join(stack))
+            except gdb.MemoryError as err:
+                print("error:", err)
 
 def all_tsos():
     # See rts/Threads.c:printAllThreads
