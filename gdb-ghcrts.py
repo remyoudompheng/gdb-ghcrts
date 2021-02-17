@@ -41,6 +41,34 @@ class InfoTsos(gdb.Command):
                 obj.print_frame(compact=compact)
             print()
 
+class InfoTsoProfile(gdb.Command):
+    "Dump stack traces of running TSOs as profile samples"
+
+    def __init__(self):
+        gdb.Command.__init__(self, "info tsoprofile", gdb.COMMAND_STACK, gdb.COMPLETE_NONE)
+
+    def invoke(self, argstr, _from_tty):
+        args = argstr.split()
+        uniq = "-u" in args
+        verbose = "-v" in args
+        for t in all_tsos():
+            if not t.running():
+                continue
+            stack = []
+            prev = None
+            for obj in t.walk_stack():
+                f = obj.funcname(pretty=True)
+                if not verbose:
+                    if f == "??" or f.startswith("stg_"):
+                        # skip
+                        continue
+                if uniq and f == prev:
+                    continue
+                stack.append(f)
+                prev = f
+            stack.reverse()
+            print(";".join(stack))
+
 def all_tsos():
     # See rts/Threads.c:printAllThreads
     n_caps = gdb.parse_and_eval('n_capabilities')
@@ -389,3 +417,4 @@ ztrans = {
 }
 
 InfoTsos()
+InfoTsoProfile()
