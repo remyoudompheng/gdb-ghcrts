@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+
+"""
+THIS SCRIPT IS EXPERIMENTAL
+
+Usage:
+    hsperf -F 10 -o flamegraph.svg -- PROGRAM ARGS
+    hsperf -F 10 -o flamegraph.svg -p PID
+"""
+
+import argparse
+import io
+import os
+import signal
+import subprocess
+import sys
+import time
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "-F", dest="freq", type=float, default=10, help="profiling frequency in Hz"
+    )
+    p.add_argument("-p", "--pid", default=None, help="PID of a process to profile")
+    p.add_argument("-o", dest="outfile", help="output SVG file")
+    p.add_argument("COMMAND", nargs="*")
+    args = p.parse_args()
+
+    # Check dependencies
+    dirname = os.path.dirname(__file__)
+    gdbplugin = os.path.join(dirname, "gdb-ghcrts.py")
+    flame_pl = os.path.join(dirname, "flamegraph.pl")
+
+    if not os.path.exists(gdbplugin):
+        print("Missing file", gdbplugin, file=sys.stderr)
+        sys.exit(1)
+
+    if not os.path.exists(flame_pl):
+        print("Missing file", flame_pl, file=sys.stderr)
+        print(
+            "Download flamegraph.pl from https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl"
+        )
+        sys.exit(1)
+
+    if not args.outfile:
+        print("Please specify an output file.")
+        sys.exit(1)
+
+    count = 0
+    if args.pid:
+        profile_out = "/tmp/gdbprofile." + args.pid
+        with open("/tmp/gdbcommands." + args.pid, "w") as f:
+            f.write(GDBSCRIPT1 % gdbplugin)
+        p = subprocess.Popen(
+            ["gdb", "-p", args.pid, "-batch", "-x", "/tmp/gdbcommands." + args.pid],
+            stdout=open(profile_out, "w"),
+            # don't propagate SIGINT to child process
+            start_new_session=True,
+        )
+        print("Waiting for GDB to attach", file=sys.stderr)
+        ready = False
+        while True:
+            try:
+                time.sleep(1.0 / args.freq)
+                if not ready:
+                    with open(profile_out) as f:
+                        if "Catchpoint" in f.read():
+                            print("Starting profile...", file=sys.stderr)
+                            ready = True
+                if not ready:
+                    continue
+                os.kill(int(args.pid), signal.SIGPROF)
+                count += 1
+            except KeyboardInterrupt:
+                print("Ctrl-C received, stopping profile", file=sys.stderr)
+                break
+        os.kill(int(args.pid), signal.SIGXCPU)
+        p.wait()
+    else:
+        suffix = str(int(time.time()))
+        profile_out = "/tmp/gdbprofile." + suffix
+        with open("/tmp/gdbcommands." + suffix, "w") as f:
+            f.write(GDBSCRIPT2 % gdbplugin)
+        p = subprocess.Popen(
+            ["gdb", "-batch", "-x", "/tmp/gdbcommands." + suffix, "--args"]
+            + args.COMMAND,
+            stdout=open(profile_out, "w"),
+            stderr=subprocess.DEVNULL,
+        )
+        pid = None
+        while True:
+            try:
+                time.sleep(1.0 / args.freq)
+                if pid is None:
+                    with open(profile_out) as f:
+                        for line in f:
+                            if line.startswith("process "):
+                                pid = line.split()[1]
+                                print("Starting profile of PID", pid, file=sys.stderr)
+                if pid is None:
+                    continue
+                if p.poll() is not None:
+                    print("Process finished", file=sys.stderr)
+                    break
+                os.kill(int(pid), signal.SIGPROF)
+                count += 1
+            except KeyboardInterrupt:
+                print("Ctrl-C received, stopping profile", file=sys.stderr)
+                break
+            except ProcessLookupError:
+                print("Process finished")
+                break
+        p.wait()
+
+    # Collect statistics
+    print(count, "profiling events triggered", file=sys.stderr)
+    samples = {}
+    databuf = io.StringIO()
+    with open(profile_out) as f:
+        for line in f:
+            if line.startswith("PROFILE;"):
+                l = line[len("PROFILE;") :].strip()
+                if not l:
+                    continue
+                samples.setdefault(l, 0)
+                samples[l] += 1
+    for line in sorted(samples):
+        print(line, samples[line], file=databuf)
+    print(sum(samples.values()), "samples collected", file=sys.stderr)
+
+    # Pipe results in flamegraph.pl
+    print("Generating flamegraph", args.outfile, file=sys.stderr)
+    out = subprocess.check_output(
+        ["perl", flame_pl, "--width", "1600", "--minwidth", "2"],
+        input=databuf.getvalue(),
+        encoding="utf-8",
+    )
+    with open(args.outfile, "w") as f:
+        f.write(out)
+
+
+# GDB script to attach to an existing process.
+GDBSCRIPT1 = """
+source %s
+set pagination off
+
+catch signal SIGPROF
+handle SIGPROF nopass
+commands 1
+info tsoprofile -u
+continue
+end
+
+catch signal SIGXCPU
+handle SIGXCPU nopass
+commands 2
+quit
+end
+
+continue
+"""
+
+# GDB script when launching a new process
+GDBSCRIPT2 = """
+set pagination off
+
+break main
+run
+
+info proc
+source %s
+
+catch signal SIGPROF
+handle SIGPROF nopass
+commands 2
+info tsoprofile -u
+continue
+end
+
+continue
+"""
+
+if __name__ == "__main__":
+    main()
