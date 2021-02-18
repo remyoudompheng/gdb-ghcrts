@@ -51,10 +51,8 @@ class InfoTsoProfile(gdb.Command):
         args = argstr.split()
         uniq = "-u" in args
         verbose = "-v" in args
-        for t in all_tsos():
+        for t in running_tsos():
             try:
-                if not t.running():
-                    continue
                 stack = []
                 prev = None
                 for obj in t.walk_stack():
@@ -92,6 +90,17 @@ def all_tsos():
         while t is not None and not t.is_end():
             yield t
             t = t.global_link()
+
+def running_tsos():
+    n_caps = gdb.parse_and_eval('n_capabilities')
+    caps = gdb.parse_and_eval('capabilities')
+
+    for i in range(n_caps):
+        cap = (caps + i).dereference()
+        tso_p = cap['r']['rCurrentTSO']
+        if not tso_p:
+            continue
+        yield TSO(tso_p)
 
 class TSO:
     "A StgTSO object"
