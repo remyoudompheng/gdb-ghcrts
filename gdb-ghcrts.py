@@ -201,7 +201,11 @@ def block_funcname(b):
     if b.function:
         return str(b.function)
 
-    return pc_funcname(b.start)
+    # At least in GHC 8.8, the start of a block is not a correct
+    # approximation to retrieve a reliable symbol name, and may point
+    # to a totally different symbol.
+    #return pc_funcname(b.start)
+    return None
 
 def guess_funcname(pc):
     """
