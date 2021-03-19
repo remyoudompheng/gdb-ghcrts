@@ -153,7 +153,7 @@ class TSO:
         base = stack['stack'].cast(StgWord_p)
         top = base + int(stack['stack_size'])
         #print("    stack", sp, "->", top)
-        while int(sp) < int(top):
+        while long(sp) < long(top):
             obj = Closure(sp)
             yield obj
             sp += obj.frame_size()
